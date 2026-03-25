@@ -22,7 +22,7 @@ def confusion_matrix_fig(cm: np.ndarray, title: str = "") -> plt.Figure:
 def roc_fig(y_true: np.ndarray, models_proba: dict) -> plt.Figure:
     y_bin = label_binarize(y_true, classes=list(range(N_CLASSES)))
     fig, ax = plt.subplots(figsize=(7, 6))
-    colors = ["steelblue", "darkorange", "green"]
+    colors = ["steelblue", "darkorange", "green", "crimson"]
     for (name, proba), color in zip(models_proba.items(), colors):
         # Pad proba to N_CLASSES columns if model was trained on fewer classes
         if proba.shape[1] < N_CLASSES:

@@ -104,6 +104,31 @@ def ieee_table_caption(doc, title):
     run2 = p.add_run(title)
     set_font(run2, size=8, italic=True)
 
+FIG_NUM = [0]  # mutable counter for IEEE figure numbering
+REPORTS_DIR = os.path.join(os.path.dirname(__file__), "reports")
+
+def ieee_add_figure(doc, image_path, caption, width=Inches(3.2)):
+    """Insert an image with IEEE-style figure caption BELOW."""
+    FIG_NUM[0] += 1
+    if not os.path.exists(image_path):
+        ieee_para(doc, f"[Image not found: {os.path.basename(image_path)}]",
+                  size=8, italic=True, first_indent=False)
+        return
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(6)
+    p.paragraph_format.space_after = Pt(2)
+    run = p.add_run()
+    run.add_picture(image_path, width=width)
+    # Caption below
+    cap = doc.add_paragraph()
+    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cap.paragraph_format.space_after = Pt(8)
+    r1 = cap.add_run(f"Fig. {FIG_NUM[0]}. ")
+    set_font(r1, size=8, bold=True)
+    r2 = cap.add_run(caption)
+    set_font(r2, size=8)
+
 def shade_cell(cell, hex_color):
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
@@ -402,6 +427,9 @@ ieee_para(doc, (
     f"the neural network (class_weight)."
 ))
 
+ieee_add_figure(doc, os.path.join(REPORTS_DIR, "class_distribution.png"),
+                "Class distribution across train, validation, and test splits.")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # III. FEATURE ENGINEERING
 # ══════════════════════════════════════════════════════════════════════════════
@@ -662,28 +690,34 @@ for m in results:
 
 ieee_subsection(doc, "C", "Confusion Matrices")
 ieee_para(doc, (
-    "Tables XI\u2013XIV present the 4\u00d74 confusion matrices (rows = true class, "
-    "columns = predicted class) for each model."
+    "Figs. 2\u20135 present the 4\u00d74 confusion matrices for each model. "
+    "Diagonal elements (correct predictions) are highlighted."
 ))
 
 for m in results:
-    cm = np.array(m["metrics"]["confusion_matrix"])
-    ieee_table_caption(doc, f"Confusion matrix \u2014 {m['name']}.")
-    cm_tbl = doc.add_table(rows=5, cols=5)
-    cm_tbl.style = "Table Grid"
-    # top-left corner blank
-    hdr_cell(cm_tbl.rows[0].cells[0], "True \\ Pred")
-    for ci, cname in enumerate(CLASS_NAMES):
-        hdr_cell(cm_tbl.rows[0].cells[ci+1], cname)
-    for ri, cname in enumerate(CLASS_NAMES):
-        row = cm_tbl.rows[ri+1]
-        tbl_cell(row.cells[0], cname, bold=True)
-        shade_cell(row.cells[0], "E8E8E8")
-        for ci, val in enumerate(cm[ri]):
-            is_diag = (ri == ci)
-            tbl_cell(row.cells[ci+1], str(val), bold=is_diag)
-            if is_diag and val > 0:
-                shade_cell(row.cells[ci+1], "D5F5E3")
+    safe = m["name"].lower().replace(" ", "_")
+    ieee_add_figure(doc, os.path.join(REPORTS_DIR, f"cm_{safe}.png"),
+                    f"Confusion matrix \u2014 {m['name']}.")
+
+ieee_subsection(doc, "D", "ROC Curves")
+ieee_para(doc, (
+    "Fig. 6 shows the macro-averaged one-vs-rest ROC curves for all four models. "
+    "XGBoost achieves the highest ROC-AUC (0.827), followed closely by the neural "
+    "network (0.826) and random forest (0.819)."
+))
+ieee_add_figure(doc, os.path.join(REPORTS_DIR, "roc_curves.png"),
+                "ROC curves (macro one-vs-rest) for all four models.")
+
+ieee_subsection(doc, "E", "Feature Importance")
+ieee_para(doc, (
+    "Figs. 7\u201310 show the top-20 features by importance for each model. "
+    "Pressure tendency and rolling pressure statistics consistently rank highest, "
+    "confirming barometric pressure change as the primary predictive signal."
+))
+for m in results:
+    safe = m["name"].lower().replace(" ", "_")
+    ieee_add_figure(doc, os.path.join(REPORTS_DIR, f"fi_{safe}.png"),
+                    f"Top-20 feature importance \u2014 {m['name']}.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # VI. ANALYSIS AND DISCUSSION

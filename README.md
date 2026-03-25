@@ -32,7 +32,7 @@ The pipeline trains offline in Python, evaluates all models on identical test da
 ## Features
 
 - **4-Class Weather Classification** — Sunny ☀️ / Cloudy ☁️ / Rainy 🌧️ / Snowy ❄️ (Stormy WMO codes merged into Rainy)
-- **24-Hour Forecast Horizon** — Predicts future conditions from the last 24 hours of sensor readings
+- **6-Hour Forecast Horizon** — Predicts conditions 6 hours ahead from the last 24 hours of sensor readings
 - **4 Model Comparison** — Logistic Regression, Random Forest, XGBoost, and Neural Network trained and evaluated side-by-side
 - **128-Feature Engineering Pipeline** — Shared feature extraction across all models (raw lags, pressure tendencies, dew point, rolling statistics, cyclical time encoding, and discriminative weather features)
 - **Edge Deployment Ready** — Generates C headers, C inference code (via m2cgen), and TFLite models for microcontroller deployment
@@ -62,7 +62,7 @@ The pipeline trains offline in Python, evaluates all models on identical test da
 │  ┌──────────┬──────────────┬──────────┬──────────┬───────────────┐  │
 │  │ Raw Lags │  Pressure &  │ Derived  │ Rolling  │Discriminative │  │
 │  │   (72)   │  Temp Rates  │  (4)     │ Stats(36)│  Features(8)  │  │
-│  │          │     (6)      │          │          │               │  │
+│  │          │    (4+2)     │          │          │               │  │
 │  └──────────┴──────────────┴──────────┴──────────┴───────────────┘  │
 │                  + Cyclical Time Encoding (4)                       │
 └────────────────────────────┬────────────────────────────────────────┘
@@ -79,7 +79,7 @@ The pipeline trains offline in Python, evaluates all models on identical test da
 │         │               │              │               │           │
 │         ▼               ▼              ▼               ▼           │
 │     lr_coeff.h      rf_model.c    xgb_model.pkl   model.tflite    │
-│      (2.8 KB)       (via m2cgen)   (5,051 KB)      (11 KB)       │
+│      (~6 KB)       (via m2cgen)   (~22 MB)        (~91 KB)        │
 └─────────────────────────────────────────────────────────────────────┘
                              │
                              ▼
@@ -161,10 +161,11 @@ All models share an identical 128-feature extraction pipeline defined in `featur
 | Group | Description | Count |
 |-------|-------------|-------|
 | Raw Lags | Temperature, Humidity, Pressure × 24 timesteps | 72 |
-| Pressure Tendency | ΔPressure at 1h, 3h, 6h, 24h intervals | 4 |
-| Temperature Rate | ΔTemp at 1h and 6h intervals | 2 |
+| Pressure Tendency | ΔPressure at 1h, 12h, 24h intervals | 3 |
+| Pressure Acceleration | ΔP_12h − ΔP_24h | 1 |
+| Temperature Rate | ΔTemp at 1h and 12h intervals | 2 |
 | Dew Point & Abs. Humidity | Magnus formula derived values | 2 |
-| Rolling Statistics | mean, std, min, max × 3h, 6h & 24h × 3 signals | 36 |
+| Rolling Statistics | mean, std, min, max × 6h, 12h & 24h × 3 signals | 36 |
 | Cyclical Time | sin/cos of hour-of-day + day-of-year | 4 |
 | Discriminative Features | Freeze flags, dew-point depression, pressure trend sign, snow/rain composites | 8 |
 | **Total** | | **128** |
@@ -172,6 +173,7 @@ All models share an identical 128-feature extraction pipeline defined in `featur
 **Key design choices:**
 - **Cyclical encoding** (sin/cos) ensures 23:00 and 00:00 are treated as adjacent, not distant
 - **Pressure tendency & acceleration** are the most predictive features for short-horizon forecasting
+- Rolling statistics use **6 h, 12 h, and 24 h** windows to capture multi-scale atmospheric trends
 - **StandardScaler** is fit only on training data — parameters exported as C arrays for edge inference
 
 ---
@@ -194,16 +196,19 @@ All models share an identical 128-feature extraction pipeline defined in `featur
 
 ### 3. XGBoost Classifier
 
-- Gradient-boosted trees with sample weighting
-- Deployment: serialized model file
-- Inference: **~15 µs** on ESP32-S3
+- 600 estimators, max depth 8, learning rate 0.03
+- Histogram-based tree method with L1/L2 regularisation
+- Balanced class weights applied via sample_weight
+- Deployment: serialized model file (~22 MB)
+- Inference: **~40 µs** on ESP32-S3
 
 ### 4. Neural Network (TFLite)
 
 - Architecture: `Input(128) → Dense(256, ReLU) → BatchNorm → Dropout(0.3) → Dense(128, ReLU) → BatchNorm → Dropout(0.25) → Dense(64, ReLU) → Dropout(0.2) → Dense(32, ReLU) → Dense(4, Softmax)`
-- Early stopping on validation loss (patience=10)
+- Early stopping on validation accuracy (patience=15), batch size 512, max 200 epochs
+- Balanced class weights passed to fit()
 - INT8 post-training quantization using 1000 stratified-random calibration samples
-- Deployment: `.tflite` → `model_data.h` (C byte array) — runs via TFLite Micro
+- Deployment: `.tflite` → `model_data.h` (C byte array, ~91 KB) — runs via TFLite Micro
 - Inference: **~86 µs** on ESP32-S3
 
 ---
@@ -278,7 +283,7 @@ All models evaluated on the same chronologically-held-out test set:
 | **XGBoost** | **58.2%** | **0.541** | 21,964 KB | ~40 µs |
 | Neural Network | 57.2% | 0.500 | 91 KB | ~86 µs |
 
-> **Note:** Models are trained on multi-station global data with 4 weather classes. SMOTE oversampling is applied selectively to minority classes only (Snowy). The primary accuracy ceiling (~58–60%) is driven by the inherent ambiguity between Sunny and Cloudy conditions using only Temperature, Humidity, and Pressure signals.
+> **Note:** Models are trained on multi-station global data with 4 weather classes. SMOTE oversampling is applied to all minority classes (capped at 20% of majority class count). Balanced class weights are additionally applied to XGBoost and the Neural Network. The primary accuracy ceiling (~58–60%) is driven by the inherent ambiguity between Sunny and Cloudy conditions using only Temperature, Humidity, and Pressure signals.
 
 ### Per-Class F1 Scores
 
@@ -345,7 +350,7 @@ BME688 Sensor Reading
         │
         ▼
 ┌───────────────────┐
-│ Collect 6 hourly  │
+│ Collect 24 hourly │
 │ readings (ring     │
 │ buffer on ESP32)   │
 └────────┬──────────┘
@@ -368,7 +373,8 @@ BME688 Sensor Reading
          ▼
 ┌───────────────────┐
 │ Run inference     │    Sunny / Cloudy / Rainy / Snowy
-│ (LR / RF / NN)   │──────────────────────────────────────────►
+│ (LR / RF / XGB /  │──────────────────────────────────────────►
+│  NN)              │
 └───────────────────┘
 ```
 
@@ -465,7 +471,7 @@ prediction/
 
 3. **Feature Engineering** — A 24-hour sliding window produces 128 features per sample: raw sensor lags, pressure tendencies, derived meteorological quantities, rolling statistics, cyclical time encoding, and 8 discriminative weather features (freeze flags, dew-point depression, snow/rain composites).
 
-4. **SMOTE Balancing** — Synthetic Minority Over-sampling Technique selectively upsamples minority classes (Snowy) in the training set only.
+4. **SMOTE Balancing** — Synthetic Minority Over-sampling Technique upsamples all minority classes (capped at 20% of majority count, max 5× expansion) in the training set only. Balanced class weights are additionally applied to XGBoost and the Neural Network.
 
 5. **Model Training** — Four models train sequentially on the balanced dataset: Logistic Regression → Random Forest → XGBoost → Neural Network.
 
