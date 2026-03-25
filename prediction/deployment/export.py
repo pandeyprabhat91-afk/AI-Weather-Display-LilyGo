@@ -1,4 +1,5 @@
 import os
+import sys
 import numpy as np
 import tensorflow as tf
 import m2cgen as m2c
@@ -50,7 +51,14 @@ def export_lr_header(model: LogisticRegressionModel, output_path: str) -> None:
 
 
 def export_rf_c(model: RandomForestModel, output_path: str) -> None:
-    code = m2c.export_to_c(model.model)
+    # m2cgen recursively traverses every tree node; raise the limit so large
+    # forests (400 trees × depth 12) don't hit Python's default 1000-frame cap.
+    old_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(max(old_limit, 100_000))
+    try:
+        code = m2c.export_to_c(model.model)
+    finally:
+        sys.setrecursionlimit(old_limit)
     with open(output_path, "w") as f:
         f.write(code)
 

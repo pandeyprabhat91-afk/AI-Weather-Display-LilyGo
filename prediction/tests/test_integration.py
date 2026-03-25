@@ -14,7 +14,7 @@ from features.config import RANDOM_SEED
 @pytest.mark.slow
 def test_full_pipeline_smoke(synthetic_weather_df, tmp_path):
     X, y = build_features(synthetic_weather_df)
-    assert X.shape[1] == 58
+    assert X.shape[1] == 128
 
     scaler = StandardScaler()
     X_s = scaler.fit_transform(X).astype(np.float32)

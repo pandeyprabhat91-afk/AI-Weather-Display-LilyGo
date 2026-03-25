@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from data.download import prepare_data
 from features.engineering import build_features
-from features.config import RANDOM_SEED, TOTAL_FEATURE_COUNT, CLASS_NAMES, STATIONS, N_CLASSES
+from features.config import RANDOM_SEED, TOTAL_FEATURE_COUNT, CLASS_NAMES, STATIONS, N_CLASSES, LOOKBACK
 from models.logistic_regression import LogisticRegressionModel
 from models.random_forest import RandomForestModel
 from models.neural_network import NeuralNetworkModel
@@ -64,7 +64,7 @@ def _stratified_sample_idx(y: np.ndarray, n: int) -> np.ndarray:
 
 
 def _lr_inference_us() -> float:
-    flops = 2 * TOTAL_FEATURE_COUNT * 5 + 5
+    flops = 2 * TOTAL_FEATURE_COUNT * N_CLASSES + N_CLASSES
     return round(flops / 240, 2)
 
 
@@ -74,7 +74,7 @@ def _rf_inference_us(rf) -> float:
 
 
 def _nn_inference_us() -> float:
-    flops = 2 * (TOTAL_FEATURE_COUNT * 64 + 64 * 32 + 32 * 5)
+    flops = 2 * (TOTAL_FEATURE_COUNT * 64 + 64 * 32 + 32 * N_CLASSES)
     return round(flops / 240, 2)
 
 
@@ -92,16 +92,19 @@ def _compute_class_weights(y: np.ndarray) -> dict:
 def _build_feature_names() -> list:
     names = []
     for sig in ["temp", "humidity", "pressure"]:
-        for t in range(6, 0, -1):
+        for t in range(LOOKBACK, 0, -1):
             names.append(f"{sig}_t-{t}h")
-    names += ["dp_1h", "dp_3h", "dp_6h", "dp_accel", "dt_1h", "dt_3h",
+    names += ["dp_1h", "dp_3h", "dp_24h", "dp_accel", "dt_1h", "dt_12h",
               "dew_point", "abs_humidity"]
     for sig in ["temp", "humidity", "pressure"]:
-        for window in ["3h", "6h"]:
+        for window in ["6h", "12h", "24h"]:
             for stat in ["mean", "std", "min", "max"]:
                 names.append(f"{sig}_{stat}_{window}")
-    names += ["sin_hour", "cos_hour", "sin_doy", "cos_doy",
-              "gas_resistance", "iaq", "eco2", "bvoc"]
+    names += ["sin_hour", "cos_hour", "sin_doy", "cos_doy"]
+    names += ["dp_depression", "is_near_freezing_any",
+              "is_below_freezing_now", "is_near_freezing_now",
+              "pressure_trend_sign", "dp_depression_norm",
+              "snow_composite", "rain_composite"]
     return names
 
 
@@ -141,7 +144,15 @@ def stage_train(args):
     export_scaler_header(scaler, os.path.join(DEPLOY_DIR, "scaler_params.h"))
 
     print("Applying SMOTE to balance training set...")
-    smote = SMOTE(random_state=RANDOM_SEED)
+    # Cap minority classes at 20% of the majority count to avoid over-amplifying
+    # rare classes (Snowy is only ~0.8% of data; full 1:1 SMOTE creates too many
+    # synthetic points and degrades precision on the majority classes).
+    from collections import Counter
+    counts = Counter(y_train.tolist())
+    majority_count = max(counts.values())
+    target_count = int(majority_count * 0.20)
+    sampling_strategy = {c: max(n, min(n * 5, target_count)) for c, n in counts.items()}
+    smote = SMOTE(random_state=RANDOM_SEED, sampling_strategy=sampling_strategy)
     X_train_sm, y_train_sm = smote.fit_resample(X_train_s, y_train)
     X_train_sm = X_train_sm.astype(np.float32)
     y_train_sm = y_train_sm.astype(np.int32)
@@ -266,7 +277,7 @@ def stage_report(args):
         })
 
     generate_report({
-        "dataset_description": "Open-Meteo historical hourly data, 3 stations (London, Helsinki, Singapore), 5 years, 6-hour ahead forecast.",
+        "dataset_description": "Open-Meteo historical hourly data, 6 stations (London, Helsinki, Singapore, Orlando, Dhaka, Manaus), 5 years, 24-hour sliding window, 4-class forecast (Sunny/Cloudy/Rainy/Snowy).",
         "models": models_for_report,
         "y_true": y_true,
         "feature_names": _build_feature_names(),

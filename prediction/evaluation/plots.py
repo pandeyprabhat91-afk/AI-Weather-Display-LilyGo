@@ -42,7 +42,7 @@ def roc_fig(y_true: np.ndarray, models_proba: dict) -> plt.Figure:
 
 def feature_importance_fig(importance: np.ndarray, feature_names: list,
                             model_type: str, title: str = "", top_n: int = 20) -> plt.Figure:
-    scores = np.mean(np.abs(importance), axis=0) if model_type == "lr" else importance
+    scores = np.mean(np.abs(importance), axis=0) if importance.ndim > 1 else importance
     idx = np.argsort(scores)[-top_n:]
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.barh([feature_names[i] for i in idx], scores[idx], color="steelblue")

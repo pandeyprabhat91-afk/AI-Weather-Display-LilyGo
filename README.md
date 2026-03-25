@@ -31,10 +31,10 @@ The pipeline trains offline in Python, evaluates all models on identical test da
 
 ## Features
 
-- **5-Class Weather Classification** — Sunny ☀️ / Cloudy ☁️ / Rainy 🌧️ / Stormy ⛈️ / Snowy ❄️
-- **6-Hour Forecast Horizon** — Predicts future conditions from the last 6 hours of sensor readings
+- **4-Class Weather Classification** — Sunny ☀️ / Cloudy ☁️ / Rainy 🌧️ / Snowy ❄️ (Stormy WMO codes merged into Rainy)
+- **24-Hour Forecast Horizon** — Predicts future conditions from the last 24 hours of sensor readings
 - **4 Model Comparison** — Logistic Regression, Random Forest, XGBoost, and Neural Network trained and evaluated side-by-side
-- **58-Feature Engineering Pipeline** — Shared feature extraction across all models (raw lags, pressure tendencies, dew point, rolling statistics, cyclical time encoding, and BME688 extras)
+- **128-Feature Engineering Pipeline** — Shared feature extraction across all models (raw lags, pressure tendencies, dew point, rolling statistics, cyclical time encoding, and discriminative weather features)
 - **Edge Deployment Ready** — Generates C headers, C inference code (via m2cgen), and TFLite models for microcontroller deployment
 - **Automated HTML Report** — Jinja2-templated comparative report with confusion matrices, ROC curves, feature importance charts, and deployment recommendations
 - **Open Data** — Trains on freely available [Open-Meteo](https://open-meteo.com/) historical weather data (no API key required)
@@ -58,10 +58,11 @@ The pipeline trains offline in Python, evaluates all models on identical test da
 ┌─────────────────────────────────────────────────────────────────────┐
 │                     FEATURE ENGINEERING                              │
 │                                                                     │
-│  engineering.py: 58 features from 6-hour sliding window             │
+│  engineering.py: 128 features from 24-hour sliding window           │
 │  ┌──────────┬──────────────┬──────────┬──────────┬───────────────┐  │
-│  │ Raw Lags │  Pressure    │ Derived  │ Rolling  │  BME688       │  │
-│  │   (18)   │  Tendency(4) │  (4)     │ Stats(24)│  Extras (4)   │  │
+│  │ Raw Lags │  Pressure &  │ Derived  │ Rolling  │Discriminative │  │
+│  │   (72)   │  Temp Rates  │  (4)     │ Stats(36)│  Features(8)  │  │
+│  │          │     (6)      │          │          │               │  │
 │  └──────────┴──────────────┴──────────┴──────────┴───────────────┘  │
 │                  + Cyclical Time Encoding (4)                       │
 └────────────────────────────┬────────────────────────────────────────┘
@@ -86,8 +87,8 @@ The pipeline trains offline in Python, evaluates all models on identical test da
 │               EDGE DEPLOYMENT (LilyGo T-Display S3)                │
 │                                                                     │
 │  BME688 Sensor ──► Feature Extraction ──► Scaled Input ──► Model   │
-│  (T, RH, P,        (same 58 features)     (scaler_params.h)        │
-│   Gas, IAQ)                                                        │
+│  (T, RH, P)        (same 128 features)    (scaler_params.h)        │
+│                     24-hour window                                 │
 │                                                                     │
 │  ESP32-S3 @ 240 MHz — Inference in microseconds, no cloud needed   │
 └─────────────────────────────────────────────────────────────────────┘
@@ -109,7 +110,7 @@ The BME688 provides live environmental readings used at inference time on the ed
 | eCO₂ | ppm equivalent | Optional — BME688 extra |
 | Breath VOC | ppm | Optional — BME688 extra |
 
-> **Note:** The 4 BME688 extras (gas, IAQ, eCO₂, bVOC) are zero-padded during training on public data since Open-Meteo doesn't provide them. At live inference on the device, actual sensor readings replace the zeros.
+> **Note:** Only Temperature, Relative Humidity, and Barometric Pressure are used for both training and inference. Gas resistance, IAQ, eCO₂, and bVOC are **not used** in the current model (omitted to match publicly available training data).
 
 ---
 
@@ -119,7 +120,7 @@ The BME688 provides live environmental readings used at inference time on the ed
 
 ### Training Stations
 
-Six geographically diverse stations ensure all five weather classes (including Snow and Stormy) are well-represented:
+Six geographically diverse stations ensure all four weather classes (Sunny, Cloudy, Rainy, Snowy) are well-represented:
 
 | Station | Coordinates | Climate |
 |---------|-------------|---------|
@@ -136,8 +137,7 @@ Six geographically diverse stations ensure all five weather classes (including S
 |-----------|-------|
 | 0, 1 | ☀️ **Sunny** |
 | 2, 3, 45–48 | ☁️ **Cloudy** |
-| 51–57, 61–67, 80–82 | 🌧️ **Rainy** |
-| 95–99 | ⛈️ **Stormy** |
+| 51–57, 61–67, 80–82, 95–99 | 🌧️ **Rainy** (Stormy codes merged in) |
 | 71–77, 85–86 | ❄️ **Snowy** |
 
 ### Data Split
@@ -156,20 +156,18 @@ The split is **strictly chronological** (no shuffling) to prevent temporal data 
 
 ## Feature Engineering
 
-All models share an identical 58-feature extraction pipeline defined in `features/engineering.py`:
+All models share an identical 128-feature extraction pipeline defined in `features/engineering.py`:
 
 | Group | Description | Count |
 |-------|-------------|-------|
-| Raw Lags | Temperature, Humidity, Pressure × 6 timesteps | 18 |
-| Pressure Tendency | ΔPressure at 1h, 3h, 6h intervals | 3 |
-| Pressure Acceleration | 2nd derivative of pressure (Δp₃ₕ − Δp₆ₕ) | 1 |
-| Temperature Rate | ΔTemp at 1h, 3h | 2 |
-| Dew Point | Magnus formula from most recent reading | 1 |
-| Absolute Humidity | August-Roche-Magnus formula | 1 |
-| Rolling Statistics | mean, std, min, max × 3h & 6h × 3 signals | 24 |
+| Raw Lags | Temperature, Humidity, Pressure × 24 timesteps | 72 |
+| Pressure Tendency | ΔPressure at 1h, 3h, 6h, 24h intervals | 4 |
+| Temperature Rate | ΔTemp at 1h and 6h intervals | 2 |
+| Dew Point & Abs. Humidity | Magnus formula derived values | 2 |
+| Rolling Statistics | mean, std, min, max × 3h, 6h & 24h × 3 signals | 36 |
 | Cyclical Time | sin/cos of hour-of-day + day-of-year | 4 |
-| BME688 Extras | Gas resistance, IAQ, eCO₂, bVOC | 4 |
-| **Total** | | **58** |
+| Discriminative Features | Freeze flags, dew-point depression, pressure trend sign, snow/rain composites | 8 |
+| **Total** | | **128** |
 
 **Key design choices:**
 - **Cyclical encoding** (sin/cos) ensures 23:00 and 00:00 are treated as adjacent, not distant
@@ -182,17 +180,17 @@ All models share an identical 58-feature extraction pipeline defined in `feature
 
 ### 1. Logistic Regression (Linear Baseline)
 
-- Multinomial softmax via `lbfgs` solver, L2 regularization
-- Class weights: `balanced`
+- Multinomial softmax via `saga` solver, L2 regularization, `max_iter=500`
+- No class weighting (SMOTE used for balance instead)
 - Deployment: coefficient matrix → `lr_coefficients.h` (C float array)
-- Inference: matrix multiply + softmax — **~2.4 µs** on ESP32-S3
+- Inference: matrix multiply + softmax — **~4.3 µs** on ESP32-S3
 
 ### 2. Random Forest Classifier
 
-- 200 trees, max depth 12
-- Class weights: `balanced_subsample`
+- 400 trees, max depth 12
+- No class weighting (SMOTE used for balance instead)
 - Deployment: converted to dependency-free C via `m2cgen` → `rf_model.c`
-- Inference: decision tree traversal — **~20 µs** on ESP32-S3
+- Inference: decision tree traversal — **~40 µs** on ESP32-S3
 
 ### 3. XGBoost Classifier
 
@@ -202,11 +200,11 @@ All models share an identical 58-feature extraction pipeline defined in `feature
 
 ### 4. Neural Network (TFLite)
 
-- Architecture: `Input(58) → Dense(64, ReLU) → Dropout(0.3) → Dense(32, ReLU) → Dense(5, Softmax)`
+- Architecture: `Input(128) → Dense(256, ReLU) → BatchNorm → Dropout(0.3) → Dense(128, ReLU) → BatchNorm → Dropout(0.25) → Dense(64, ReLU) → Dropout(0.2) → Dense(32, ReLU) → Dense(4, Softmax)`
 - Early stopping on validation loss (patience=10)
 - INT8 post-training quantization using 1000 stratified-random calibration samples
 - Deployment: `.tflite` → `model_data.h` (C byte array) — runs via TFLite Micro
-- Inference: **~49 µs** on ESP32-S3
+- Inference: **~86 µs** on ESP32-S3
 
 ---
 
@@ -275,12 +273,21 @@ All models evaluated on the same chronologically-held-out test set:
 
 | Model | Accuracy | Macro F1 | Artifact Size | Inference Time (ESP32-S3) |
 |-------|----------|----------|---------------|---------------------------|
-| Logistic Regression | 21.0% | 0.202 | 2.8 KB | ~2.4 µs |
-| Random Forest | 30.2% | 0.251 | 159,860 KB | ~20 µs |
-| **XGBoost** | **41.9%** | **0.250** | 5,051 KB | ~15 µs |
-| Neural Network | 31.1% | 0.254 | 11 KB | ~49 µs |
+| Logistic Regression | 56.2% | 0.482 | 6 KB | ~4.3 µs |
+| Random Forest | 58.1% | 0.522 | 264,207 KB | ~40 µs |
+| **XGBoost** | **58.2%** | **0.541** | 21,964 KB | ~40 µs |
+| Neural Network | 57.2% | 0.500 | 91 KB | ~86 µs |
 
-> **Note:** These results reflect training on multi-station global data with extreme class imbalance (Stormy class is very rare). The pipeline uses SMOTE oversampling and balanced class weights to mitigate this. Model performance is expected to improve significantly with station-specific fine-tuning and additional feature engineering.
+> **Note:** Models are trained on multi-station global data with 4 weather classes. SMOTE oversampling is applied selectively to minority classes only (Snowy). The primary accuracy ceiling (~58–60%) is driven by the inherent ambiguity between Sunny and Cloudy conditions using only Temperature, Humidity, and Pressure signals.
+
+### Per-Class F1 Scores
+
+| Class | Logistic Reg | Random Forest | XGBoost | Neural Network |
+|-------|-------------|---------------|---------|----------------|
+| Sunny | 0.564 | 0.587 | 0.631 | 0.650 |
+| Cloudy | 0.606 | 0.618 | 0.565 | 0.533 |
+| Rainy | 0.461 | 0.476 | 0.547 | 0.545 |
+| Snowy | 0.299 | 0.407 | 0.420 | 0.272 |
 
 ### Confusion Matrices
 
@@ -345,7 +352,7 @@ BME688 Sensor Reading
          │
          ▼
 ┌───────────────────┐
-│ Extract 58        │
+│ Extract 128       │
 │ features          │
 │ (same pipeline    │
 │  as training)     │
@@ -360,7 +367,7 @@ BME688 Sensor Reading
          │
          ▼
 ┌───────────────────┐
-│ Run inference     │    Sunny / Cloudy / Rainy / Stormy / Snowy
+│ Run inference     │    Sunny / Cloudy / Rainy / Snowy
 │ (LR / RF / NN)   │──────────────────────────────────────────►
 └───────────────────┘
 ```
@@ -382,7 +389,7 @@ prediction/
 │
 ├── features/
 │   ├── config.py               # RANDOM_SEED, LABEL_MAP, WMO_MAP, STATIONS, feature counts
-│   └── engineering.py          # 58-feature extraction (shared by all models)
+    └── engineering.py          # 128-feature extraction (shared by all models)
 │
 ├── models/
 │   ├── logistic_regression.py  # LogisticRegressionModel class
@@ -452,13 +459,13 @@ prediction/
 
 ## How It Works
 
-1. **Data Download** — Fetches 5 years of hourly weather data from Open-Meteo for 6 globally diverse stations. WMO weather codes are mapped to 5 target classes. Data is cached locally.
+1. **Data Download** — Fetches 5 years of hourly weather data from Open-Meteo for 6 globally diverse stations. WMO weather codes are mapped to 4 target classes. Data is cached locally.
 
 2. **Chronological Split** — Data is split 70/15/15 into train/val/test sets strictly by time (no shuffling) to prevent temporal leakage.
 
-3. **Feature Engineering** — A 6-hour sliding window produces 58 features per sample: raw sensor lags, pressure tendencies, derived meteorological quantities, rolling statistics, and cyclical time encoding.
+3. **Feature Engineering** — A 24-hour sliding window produces 128 features per sample: raw sensor lags, pressure tendencies, derived meteorological quantities, rolling statistics, cyclical time encoding, and 8 discriminative weather features (freeze flags, dew-point depression, snow/rain composites).
 
-4. **SMOTE Balancing** — Synthetic Minority Over-sampling Technique balances the training set to handle rare weather classes (Stormy, Snowy).
+4. **SMOTE Balancing** — Synthetic Minority Over-sampling Technique selectively upsamples minority classes (Snowy) in the training set only.
 
 5. **Model Training** — Four models train sequentially on the balanced dataset: Logistic Regression → Random Forest → XGBoost → Neural Network.
 
@@ -477,10 +484,10 @@ Key constants in `features/config.py`:
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `RANDOM_SEED` | 42 | Global reproducibility seed |
-| `LOOKBACK` | 6 | Hours of history used as input |
+| `LOOKBACK` | 24 | Hours of history used as input |
 | `LOOKAHEAD` | 6 | Hours ahead to predict |
-| `N_CLASSES` | 5 | Sunny, Cloudy, Rainy, Stormy, Snowy |
-| `TOTAL_FEATURE_COUNT` | 58 | 54 core + 4 BME688 extras |
+| `N_CLASSES` | 4 | Sunny, Cloudy, Rainy, Snowy |
+| `TOTAL_FEATURE_COUNT` | 128 | Across 6 feature groups |
 
 ---
 

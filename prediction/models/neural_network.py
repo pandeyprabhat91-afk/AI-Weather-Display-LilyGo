@@ -12,8 +12,14 @@ class NeuralNetworkModel:
     def _build(self) -> keras.Model:
         tf.random.set_seed(self.random_seed)
         inp = keras.Input(shape=(TOTAL_FEATURE_COUNT,))
-        x = keras.layers.Dense(64, activation="relu")(inp)
+        x = keras.layers.Dense(256, activation="relu")(inp)
+        x = keras.layers.BatchNormalization()(x)
         x = keras.layers.Dropout(0.3, seed=self.random_seed)(x)
+        x = keras.layers.Dense(128, activation="relu")(x)
+        x = keras.layers.BatchNormalization()(x)
+        x = keras.layers.Dropout(0.25, seed=self.random_seed)(x)
+        x = keras.layers.Dense(64, activation="relu")(x)
+        x = keras.layers.Dropout(0.2, seed=self.random_seed)(x)
         x = keras.layers.Dense(32, activation="relu")(x)
         out = keras.layers.Dense(N_CLASSES, activation="softmax")(x)
         model = keras.Model(inputs=inp, outputs=out)
@@ -24,11 +30,11 @@ class NeuralNetworkModel:
         )
         return model
 
-    def fit(self, X, y, X_val, y_val, epochs=100, batch_size=256, class_weight=None):
+    def fit(self, X, y, X_val, y_val, epochs=200, batch_size=512, class_weight=None):
         self._model = self._build()
         callbacks = [
-            keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True),
-            keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=5, verbose=0),
+            keras.callbacks.EarlyStopping(monitor="val_accuracy", patience=15, restore_best_weights=True),
+            keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=7, verbose=0),
         ]
         self._model.fit(X, y, validation_data=(X_val, y_val),
                         epochs=epochs, batch_size=batch_size,

@@ -5,11 +5,12 @@ from features.config import RANDOM_SEED
 
 
 class RandomForestModel:
-    def __init__(self, n_estimators: int = 200, max_depth: int = 12, random_seed: int = RANDOM_SEED):
+    def __init__(self, n_estimators: int = 400, max_depth: int = 12, random_seed: int = RANDOM_SEED):
         self.model = RandomForestClassifier(
             n_estimators=n_estimators,
             max_depth=max_depth,
-            class_weight="balanced_subsample",
+            min_samples_leaf=2,
+            class_weight=None,
             random_state=random_seed,
             n_jobs=-1,
         )

@@ -30,19 +30,20 @@ def test_build_features_dtype(synthetic_weather_df):
     assert X.dtype == np.float32
     assert y.dtype == np.int32
 
-def test_build_features_bme688_extras_zero_padded(synthetic_weather_df):
-    X, _ = build_features(synthetic_weather_df)
-    assert (X[:, -4:] == 0.0).all()
-
-def test_build_features_with_bme688_extras(synthetic_weather_df):
+def test_build_features_ignores_bme688_extras(synthetic_weather_df):
+    """BME688 gas/IAQ/eCO2/bVOC columns are ignored — only temp/humidity/pressure are used."""
     df = synthetic_weather_df.copy()
     rng = np.random.default_rng(0)
     df["gas_resistance"] = rng.uniform(1000, 50000, len(df))
     df["iaq"]  = rng.uniform(0, 500, len(df))
     df["eco2"] = rng.uniform(400, 2000, len(df))
     df["bvoc"] = rng.uniform(0, 10, len(df))
-    X, _ = build_features(df)
-    assert not (X[:, -4:] == 0.0).all()
+    X_with_extras, _ = build_features(df)
+    X_without, _     = build_features(synthetic_weather_df)
+    # Feature count is 54 regardless of extra columns in df
+    assert X_with_extras.shape[1] == TOTAL_FEATURE_COUNT
+    # Extra columns have zero effect on the feature output
+    np.testing.assert_array_equal(X_with_extras, X_without)
 
 def test_dew_point_formula():
     T_d = compute_dew_point(T=20.0, RH=50.0)

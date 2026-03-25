@@ -7,7 +7,7 @@ from features.config import TOTAL_FEATURE_COUNT, RANDOM_SEED
 @pytest.fixture
 def synthetic_weather_df():
     rng = np.random.default_rng(RANDOM_SEED)
-    n = 200
+    n = 500
     times = pd.date_range("2020-06-01", periods=n, freq="h")
     return pd.DataFrame({
         "time": times,

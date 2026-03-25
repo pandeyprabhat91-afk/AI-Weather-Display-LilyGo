@@ -7,10 +7,9 @@ from features.config import RANDOM_SEED
 class LogisticRegressionModel:
     def __init__(self, C: float = 1.0, random_seed: int = RANDOM_SEED):
         self.model = LogisticRegression(
-            solver="lbfgs",
-            max_iter=1000,
+            solver="saga",
+            max_iter=500,
             C=C,
-            class_weight="balanced",
             random_state=random_seed,
         )
 

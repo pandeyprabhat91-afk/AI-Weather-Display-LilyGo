@@ -91,11 +91,31 @@ def forward_fill_gaps(df: pd.DataFrame, max_gap_hours: int = 2) -> pd.DataFrame:
 
 
 def split_data(df: pd.DataFrame):
-    df = df.sort_values("time").reset_index(drop=True)
-    n = len(df)
-    i_train = int(n * 0.70)
-    i_val = int(n * 0.85)
-    return df.iloc[:i_train].copy(), df.iloc[i_train:i_val].copy(), df.iloc[i_val:].copy()
+    """Split data per-station chronologically (70/15/15) then concatenate.
+    This guarantees every climate zone and rare class (Stormy, Snowy) is
+    represented in every split, regardless of when those events occurred."""
+    if "station" not in df.columns or df["station"].nunique() <= 1:
+        df = df.sort_values("time").reset_index(drop=True)
+        n = len(df)
+        i_train = int(n * 0.70)
+        i_val = int(n * 0.85)
+        return df.iloc[:i_train].copy(), df.iloc[i_train:i_val].copy(), df.iloc[i_val:].copy()
+
+    train_parts, val_parts, test_parts = [], [], []
+    for _, group in df.groupby("station", sort=False):
+        g = group.sort_values("time").reset_index(drop=True)
+        n = len(g)
+        i_train = int(n * 0.70)
+        i_val   = int(n * 0.85)
+        train_parts.append(g.iloc[:i_train])
+        val_parts.append(g.iloc[i_train:i_val])
+        test_parts.append(g.iloc[i_val:])
+
+    return (
+        pd.concat(train_parts, ignore_index=True),
+        pd.concat(val_parts,   ignore_index=True),
+        pd.concat(test_parts,  ignore_index=True),
+    )
 
 
 def prepare_data(stations=None, years: int = 5, force_download: bool = False):

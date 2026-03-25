@@ -2,19 +2,21 @@
 
 RANDOM_SEED = 42
 
-LOOKBACK = 6   # hours of history used as input
+LOOKBACK = 24  # hours of history used as input (captures full diurnal cycle)
 LOOKAHEAD = 6  # hours ahead to predict
 
 # --- Labels ---
+# Stormy (WMO 95-99) is absent from Open-Meteo historical archive for all 6
+# training stations → merged into Rainy (class 2).  Snowy moves to index 3
+# so there is no dead neuron in the classifier.
 LABEL_MAP = {
     0: "Sunny",
     1: "Cloudy",
     2: "Rainy",
-    3: "Stormy",
-    4: "Snowy",
+    3: "Snowy",
 }
-CLASS_NAMES = [LABEL_MAP[i] for i in range(5)]
-N_CLASSES = 5
+CLASS_NAMES = [LABEL_MAP[i] for i in range(4)]
+N_CLASSES = 4
 
 # --- WMO weather code → label int ---
 WMO_MAP: dict = {}
@@ -24,12 +26,11 @@ for code in [2, 3, 45, 46, 47, 48]:
     WMO_MAP[code] = 1  # Cloudy
 for code in [51, 52, 53, 54, 55, 56, 57,
              61, 62, 63, 64, 65, 66, 67,
-             80, 81, 82]:
+             80, 81, 82,
+             95, 96, 97, 98, 99]:   # Stormy merged into Rainy
     WMO_MAP[code] = 2  # Rainy
-for code in [95, 96, 97, 98, 99]:
-    WMO_MAP[code] = 3  # Stormy
 for code in [71, 72, 73, 74, 75, 76, 77, 85, 86]:
-    WMO_MAP[code] = 4  # Snowy
+    WMO_MAP[code] = 3  # Snowy
 
 # --- Default training stations: (name, latitude, longitude) ---
 # First 3: original coverage (Europe + tropical); last 3: high-thunderstorm
@@ -47,8 +48,17 @@ STATIONS = [
 BME688_EXTRAS = ["gas_resistance", "iaq", "eco2", "bvoc"]
 
 # --- Feature count bookkeeping ---
-# 18 raw lags + 3 pressure tendency + 1 pressure accel +
-# 2 temp rate + 1 dew point + 1 abs humidity +
-# 24 rolling stats + 4 cyclical time = 54
-CORE_FEATURE_COUNT = 54
-TOTAL_FEATURE_COUNT = CORE_FEATURE_COUNT + len(BME688_EXTRAS)  # 58
+# 72 raw lags (3 signals × 24 steps)
+#  + 3 pressure tendency (1h, 12h, 24h)
+#  + 1 pressure acceleration
+#  + 2 temp rate of change (1h, 12h)
+#  + 1 dew point  + 1 abs humidity
+#  + 36 rolling stats (3 signals × 3 windows × 4 stats)
+#  + 4 cyclical time
+#  + 8 discriminative threshold features (dew-point depression, freeze flags,
+#       pressure-trend sign, normalised dp-dep, snow composite, rain composite)
+# = 128
+# BME688 extras (gas/IAQ/eCO2/bVOC) are EXCLUDED — inference uses only
+# temperature, humidity and pressure from the BME688 sensor.
+CORE_FEATURE_COUNT = 128
+TOTAL_FEATURE_COUNT = CORE_FEATURE_COUNT  # 128
