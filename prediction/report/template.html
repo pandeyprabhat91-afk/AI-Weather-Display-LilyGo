@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AI Weather Prediction — Model Comparison Report</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; color: #222; }
+  h1 { color: #1a5276; border-bottom: 2px solid #1a5276; padding-bottom: 0.5rem; }
+  h2 { color: #1f618d; margin-top: 2rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #bdc3c7; padding: 0.5rem 0.75rem; text-align: center; }
+  th { background: #2e86c1; color: white; }
+  tr:nth-child(even) { background: #eaf4fb; }
+  .best { background: #d5f5e3 !important; font-weight: bold; }
+  .figure-row { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
+  .figure-row img { max-width: 350px; border: 1px solid #ccc; border-radius: 4px; }
+  .recommendation { background: #eafaf1; border-left: 4px solid #27ae60; padding: 1rem 1.5rem; border-radius: 0 4px 4px 0; margin: 1rem 0; }
+  .note { color: #7f8c8d; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<h1>AI Weather Prediction — Model Comparison Report</h1>
+<p class="note">Generated: {{ generated_at }} | Dataset: {{ dataset_description }}</p>
+
+<h2>1. Executive Summary</h2>
+<table>
+  <tr><th>Model</th><th>Accuracy</th><th>Macro F1</th><th>ROC-AUC</th><th>Artifact Size</th><th>Est. Inference (µs)</th></tr>
+  {% for m in models %}
+  <tr class="{{ 'best' if m.name == best_model else '' }}">
+    <td>{{ m.name }}</td>
+    <td>{{ "%.3f" % m.accuracy }}</td>
+    <td>{{ "%.3f" % m.macro_f1 }}</td>
+    <td>{{ "%.3f" % m.roc_auc }}</td>
+    <td>{{ m.artifact_size_kb }} KB</td>
+    <td>{{ m.inference_us }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>2. Dataset</h2>
+<p>{{ dataset_description }}</p>
+<div class="figure-row"><img src="class_distribution.png" alt="Class Distribution"></div>
+
+<h2>3. Confusion Matrices</h2>
+<div class="figure-row">
+  {% for m in models %}
+  <div>
+    <p><strong>{{ m.name }}</strong></p>
+    <img src="cm_{{ m.name | lower | replace(' ', '_') }}.png" alt="{{ m.name }} CM">
+  </div>
+  {% endfor %}
+</div>
+
+<h2>4. ROC Curves</h2>
+<img src="roc_curves.png" alt="ROC Curves" style="max-width: 600px;">
+
+<h2>5. Feature Importance</h2>
+<div class="figure-row">
+  {% for m in models %}
+  <div>
+    <p><strong>{{ m.name }}</strong></p>
+    <img src="fi_{{ m.name | lower | replace(' ', '_') }}.png" alt="{{ m.name }} FI">
+  </div>
+  {% endfor %}
+</div>
+
+<h2>6. Per-Class Metrics</h2>
+{% for m in models %}
+<h3>{{ m.name }}</h3>
+<table>
+  <tr><th>Class</th><th>Precision</th><th>Recall</th><th>F1</th></tr>
+  {% for cls, p, r, f in m.per_class %}
+  <tr><td>{{ cls }}</td><td>{{ "%.3f" % p }}</td><td>{{ "%.3f" % r }}</td><td>{{ "%.3f" % f }}</td></tr>
+  {% endfor %}
+</table>
+{% endfor %}
+
+<h2>7. Deployment Recommendation</h2>
+<div class="recommendation">
+  <strong>Recommended: {{ best_model }}</strong><br>{{ recommendation_text }}
+</div>
+<p class="note">Inference times are analytical estimates (240 MHz ESP32-S3, IPC=1). Actual ±30%.</p>
+</body>
+</html>
