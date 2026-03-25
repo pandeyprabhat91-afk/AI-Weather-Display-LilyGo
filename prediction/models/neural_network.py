@@ -24,7 +24,7 @@ class NeuralNetworkModel:
         )
         return model
 
-    def fit(self, X, y, X_val, y_val, epochs=100, batch_size=256):
+    def fit(self, X, y, X_val, y_val, epochs=100, batch_size=256, class_weight=None):
         self._model = self._build()
         callbacks = [
             keras.callbacks.EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True),
@@ -32,7 +32,8 @@ class NeuralNetworkModel:
         ]
         self._model.fit(X, y, validation_data=(X_val, y_val),
                         epochs=epochs, batch_size=batch_size,
-                        callbacks=callbacks, verbose=0)
+                        callbacks=callbacks, verbose=0,
+                        class_weight=class_weight)
         return self
 
     def predict(self, X) -> np.ndarray:

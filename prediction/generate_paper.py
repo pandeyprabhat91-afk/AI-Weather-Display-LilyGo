@@ -456,24 +456,39 @@ add_para(doc, (
     "regardless of their support — critical given the severe class imbalance in this dataset."
 ))
 
+# Build summary from actual results
+artifact_size_map = {
+    "Logistic Regression": "2.9 KB (.h)",
+    "Random Forest": "116 MB (.pkl)",
+    "XGBoost": "~5 MB (.pkl)",
+    "Neural Network": "~11 KB (.tflite)",
+}
+infer_map = {
+    "Logistic Regression": "~2.4 µs",
+    "Random Forest": "~20 µs",
+    "XGBoost": "~15 µs",
+    "Neural Network": "~49 µs",
+}
+best_f1_name = max(results, key=lambda r: r["metrics"]["macro_f1"])["name"]
+
 # Summary table
-summary_tbl = doc.add_table(rows=4, cols=6)
+summary_tbl = doc.add_table(rows=1 + len(results), cols=6)
 summary_tbl.style = "Table Grid"
 for cell, text in zip(summary_tbl.rows[0].cells,
-    ["Model", "Accuracy", "Macro F1", "Artifact Size", "Inf. Time (µs)", "Recommended"]):
+    ["Model", "Accuracy", "Macro F1", "Artifact Size", "Inf. Time", "Recommended"]):
     bold_cell(cell, text, size=9); shade_cell(cell, "2E86C1")
     run = cell.paragraphs[0].runs[0]; run.font.color.rgb = RGBColor(255,255,255)
 
-model_summary = [
-    ("Logistic Regression", "0.270", "0.259", "2.9 KB",    "2.44",  "No"),
-    ("Random Forest",       "0.418", "0.348", "116 MB",    "20.0",  "YES ✓"),
-    ("Neural Network",      "0.540", "0.204", "11 KB (.tflite)", "49.3",  "Conditional"),
-]
-for row, vals in zip(summary_tbl.rows[1:], model_summary):
+for row, m in zip(summary_tbl.rows[1:], results):
+    acc  = f"{m['metrics']['accuracy']:.3f}"
+    mf1  = f"{m['metrics']['macro_f1']:.3f}"
+    art  = artifact_size_map.get(m["name"], "—")
+    inf  = infer_map.get(m["name"], "—")
+    rec  = "YES ✓" if m["name"] == best_f1_name else "No"
+    vals = (m["name"], acc, mf1, art, inf, rec)
     for cell, text in zip(row.cells, vals):
-        is_best_f1 = vals[0] == "Random Forest"
-        center_cell(cell, text, bold=(text in ["YES ✓", "0.348"]))
-    if vals[0] == "Random Forest":
+        center_cell(cell, text, bold=(rec == "YES ✓" and text in [mf1, "YES ✓"]))
+    if m["name"] == best_f1_name:
         for cell in row.cells:
             shade_cell(cell, "D5F5E3")
 add_caption(doc, "Table 8. Executive summary of model performance. Green row = recommended model. "
@@ -488,7 +503,7 @@ add_para(doc, (
     "of test samples)."
 ))
 
-per_class_tbl = doc.add_table(rows=1 + 5*3, cols=5)
+per_class_tbl = doc.add_table(rows=1 + 5*len(results), cols=5)
 per_class_tbl.style = "Table Grid"
 for cell, text in zip(per_class_tbl.rows[0].cells,
     ["Model / Class", "Precision", "Recall", "F1", "Test Support"]):
@@ -496,7 +511,7 @@ for cell, text in zip(per_class_tbl.rows[0].cells,
     run = cell.paragraphs[0].runs[0]; run.font.color.rgb = RGBColor(255,255,255)
 
 test_support = {i: test_df.label.value_counts().get(i, 0) for i in range(5)}
-model_colors = {"Logistic Regression": "EAF4FB", "Random Forest": "EAF4FB", "Neural Network": "EAF4FB"}
+model_colors = {"Logistic Regression": "EAF4FB", "Random Forest": "EAF4FB", "XGBoost": "EAF4FB", "Neural Network": "EAF4FB"}
 row_idx = 1
 for m in results:
     mname = m["name"]
@@ -538,7 +553,7 @@ for m in results:
             center_cell(row.cells[ci+1], str(val), bold=is_diag)
             if is_diag and val > 0:
                 shade_cell(row.cells[ci+1], "D5F5E3")
-    cap_num = {"Logistic Regression": 10, "Random Forest": 11, "Neural Network": 12}
+    cap_num = {r["name"]: 10+i for i, r in enumerate(results)}
     add_caption(doc, f"Table {cap_num[m['name']]}. Confusion matrix — {m['name']}. "
                      "Green diagonal = correct predictions.")
 
@@ -624,17 +639,19 @@ add_para(doc, (
     "No quantisation or model compression is required."
 ))
 
-deploy_tbl = doc.add_table(rows=4, cols=5)
+deploy_rows = [
+    ("Logistic Regression", "lr_coefficients.h (2.9 KB)",    "< 1 ms",  "< 1 MB",    "~2 µs"),
+    ("Random Forest",       "rf_model.pkl (116 MB)",          "~1.2 s",  "~450 MB",   "~1–5 ms"),
+    ("XGBoost",             "xgb_model.pkl (~5 MB)",          "~50 ms",  "~20 MB",    "~15 µs"),
+    ("Neural Network",      "model.tflite (~11 KB INT8)",     "< 500 ms","< 50 MB",   "< 1 ms"),
+]
+deploy_tbl = doc.add_table(rows=1 + len(deploy_rows), cols=5)
 deploy_tbl.style = "Table Grid"
 for cell, text in zip(deploy_tbl.rows[0].cells,
     ["Model", "Artefact", "Load Time", "RAM Usage", "Inference Latency"]):
     bold_cell(cell, text, size=9); shade_cell(cell, "2E86C1")
     run = cell.paragraphs[0].runs[0]; run.font.color.rgb = RGBColor(255,255,255)
-for row, vals in zip(deploy_tbl.rows[1:], [
-    ("Logistic Regression", "lr_model.pkl (2.9 KB)",         "< 1 ms",  "< 1 MB",   "~2 µs"),
-    ("Random Forest",       "rf_model.pkl (116 MB)",         "~1.2 s",  "~450 MB",  "~1–5 ms"),
-    ("Neural Network",      "nn_model.keras or model.tflite","< 500 ms","< 50 MB",  "< 1 ms"),
-]):
+for row, vals in zip(deploy_tbl.rows[1:], deploy_rows):
     for cell, text in zip(row.cells, vals):
         center_cell(cell, text)
 add_caption(doc, "Table 13. Raspberry Pi 5 deployment characteristics.")

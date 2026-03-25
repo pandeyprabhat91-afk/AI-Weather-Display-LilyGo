@@ -20,15 +20,18 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.utils.class_weight import compute_class_weight
+from imblearn.over_sampling import SMOTE
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from data.download import prepare_data
 from features.engineering import build_features
-from features.config import RANDOM_SEED, TOTAL_FEATURE_COUNT, CLASS_NAMES, STATIONS
+from features.config import RANDOM_SEED, TOTAL_FEATURE_COUNT, CLASS_NAMES, STATIONS, N_CLASSES
 from models.logistic_regression import LogisticRegressionModel
 from models.random_forest import RandomForestModel
 from models.neural_network import NeuralNetworkModel
+from models.xgboost_model import XGBoostModel
 from evaluation.metrics import compute_all_metrics
 from deployment.export import export_scaler_header, export_lr_header, export_rf_c, export_tflite
 from report.generate import generate_report
@@ -73,6 +76,17 @@ def _rf_inference_us(rf) -> float:
 def _nn_inference_us() -> float:
     flops = 2 * (TOTAL_FEATURE_COUNT * 64 + 64 * 32 + 32 * 5)
     return round(flops / 240, 2)
+
+
+def _xgb_inference_us(xgb) -> float:
+    flops = 2 * xgb.model.get_params()["max_depth"] * xgb.model.get_params()["n_estimators"]
+    return round(flops / 240, 2)
+
+
+def _compute_class_weights(y: np.ndarray) -> dict:
+    classes = np.unique(y)
+    weights = compute_class_weight("balanced", classes=classes, y=y)
+    return {int(c): float(w) for c, w in zip(classes, weights)}
 
 
 def _build_feature_names() -> list:
@@ -126,21 +140,36 @@ def stage_train(args):
     joblib.dump(scaler, os.path.join(DEPLOY_DIR, "scaler.pkl"))
     export_scaler_header(scaler, os.path.join(DEPLOY_DIR, "scaler_params.h"))
 
+    print("Applying SMOTE to balance training set...")
+    smote = SMOTE(random_state=RANDOM_SEED)
+    X_train_sm, y_train_sm = smote.fit_resample(X_train_s, y_train)
+    X_train_sm = X_train_sm.astype(np.float32)
+    y_train_sm = y_train_sm.astype(np.int32)
+    print(f"  After SMOTE: {X_train_sm.shape} (was {X_train_s.shape})")
+
+    cw = _compute_class_weights(y_train_sm)
+    sample_weights = np.array([cw[int(c)] for c in y_train_sm], dtype=np.float32)
+
     print("Training Logistic Regression...")
     lr = LogisticRegressionModel(random_seed=RANDOM_SEED)
-    lr.fit(X_train_s, y_train)
+    lr.fit(X_train_sm, y_train_sm)
     lr.save(os.path.join(DEPLOY_DIR, "lr_model.pkl"))
     export_lr_header(lr, os.path.join(DEPLOY_DIR, "lr_coefficients.h"))
 
     print("Training Random Forest...")
     rf = RandomForestModel(random_seed=RANDOM_SEED)
-    rf.fit(X_train_s, y_train)
+    rf.fit(X_train_sm, y_train_sm)
     rf.save(os.path.join(DEPLOY_DIR, "rf_model.pkl"))
     export_rf_c(rf, os.path.join(DEPLOY_DIR, "rf_model.c"))
 
+    print("Training XGBoost...")
+    xgb = XGBoostModel(random_seed=RANDOM_SEED)
+    xgb.fit(X_train_sm, y_train_sm, sample_weight=sample_weights)
+    xgb.save(os.path.join(DEPLOY_DIR, "xgb_model.pkl"))
+
     print("Training Neural Network...")
     nn = NeuralNetworkModel(random_seed=RANDOM_SEED)
-    nn.fit(X_train_s, y_train, X_val=X_val_s, y_val=y_val)
+    nn.fit(X_train_sm, y_train_sm, X_val=X_val_s, y_val=y_val, class_weight=cw)
     nn.save(os.path.join(DEPLOY_DIR, "nn_model.keras"))
 
     cal_idx = _stratified_sample_idx(y_train, n=1000)
@@ -151,7 +180,7 @@ def stage_train(args):
 
 
 def stage_evaluate(args):
-    for name in ["lr_model.pkl", "rf_model.pkl", "nn_model.keras", "scaler.pkl"]:
+    for name in ["lr_model.pkl", "rf_model.pkl", "xgb_model.pkl", "nn_model.keras", "scaler.pkl"]:
         _require(os.path.join(DEPLOY_DIR, name),
                  f"deployment/{name} not found. Run: python main.py --only train")
     _require(os.path.join(PROCESSED_DIR, "test.csv"),
@@ -162,15 +191,17 @@ def stage_evaluate(args):
     scaler = joblib.load(os.path.join(DEPLOY_DIR, "scaler.pkl"))
     X_test_s = scaler.transform(X_test).astype(np.float32)
 
-    lr = LogisticRegressionModel.load(os.path.join(DEPLOY_DIR, "lr_model.pkl"))
-    rf = RandomForestModel.load(os.path.join(DEPLOY_DIR, "rf_model.pkl"))
-    nn = NeuralNetworkModel.load(os.path.join(DEPLOY_DIR, "nn_model.keras"))
+    lr  = LogisticRegressionModel.load(os.path.join(DEPLOY_DIR, "lr_model.pkl"))
+    rf  = RandomForestModel.load(os.path.join(DEPLOY_DIR, "rf_model.pkl"))
+    xgb = XGBoostModel.load(os.path.join(DEPLOY_DIR, "xgb_model.pkl"))
+    nn  = NeuralNetworkModel.load(os.path.join(DEPLOY_DIR, "nn_model.keras"))
 
     results = []
     for name, model, importance, imp_type, infer_us in [
-        ("Logistic Regression", lr, lr.get_feature_importances(),  "lr", _lr_inference_us()),
-        ("Random Forest",       rf, rf.get_feature_importances(),  "rf", _rf_inference_us(rf)),
-        ("Neural Network",      nn, lr.get_feature_importances(),  "lr", _nn_inference_us()),
+        ("Logistic Regression", lr,  lr.get_feature_importances(),  "lr",  _lr_inference_us()),
+        ("Random Forest",       rf,  rf.get_feature_importances(),  "rf",  _rf_inference_us(rf)),
+        ("XGBoost",             xgb, xgb.get_feature_importances(), "rf",  _xgb_inference_us(xgb)),
+        ("Neural Network",      nn,  lr.get_feature_importances(),  "lr",  _nn_inference_us()),
     ]:
         y_pred  = model.predict(X_test_s)
         y_proba = model.predict_proba(X_test_s)
@@ -178,6 +209,7 @@ def stage_evaluate(args):
         artifact_paths = {
             "Logistic Regression": os.path.join(DEPLOY_DIR, "lr_coefficients.h"),
             "Random Forest":       os.path.join(DEPLOY_DIR, "rf_model.c"),
+            "XGBoost":             os.path.join(DEPLOY_DIR, "xgb_model.pkl"),
             "Neural Network":      os.path.join(DEPLOY_DIR, "model.tflite"),
         }
         results.append({
@@ -229,7 +261,7 @@ def stage_report(args):
             "artifact_size_kb": s["artifact_size_kb"],
             "inference_us": s["inference_us"],
             "importance": np.load(os.path.join(EVAL_DIR, f"importance_{key}.npy")),
-            "importance_type": "lr" if "Logistic" in s["name"] else ("rf" if "Forest" in s["name"] else "lr"),
+            "importance_type": "lr" if "Logistic" in s["name"] else ("rf" if ("Forest" in s["name"] or "XGBoost" in s["name"]) else "lr"),
             "y_proba": np.load(os.path.join(EVAL_DIR, f"y_proba_{key}.npy")),
         })
 

@@ -32,10 +32,15 @@ for code in [71, 72, 73, 74, 75, 76, 77, 85, 86]:
     WMO_MAP[code] = 4  # Snowy
 
 # --- Default training stations: (name, latitude, longitude) ---
+# First 3: original coverage (Europe + tropical); last 3: high-thunderstorm
+# stations that reliably produce WMO 95-99 (Stormy) labels
 STATIONS = [
-    ("London, UK",        51.5074, -0.1278),
-    ("Helsinki, Finland", 60.1699, 25.0002),
+    ("London, UK",        51.5074,  -0.1278),
+    ("Helsinki, Finland", 60.1699,  25.0002),
     ("Singapore",          1.3521, 103.8198),
+    ("Orlando, US",       28.5383, -81.3792),
+    ("Dhaka, Bangladesh", 23.7275,  90.4070),
+    ("Manaus, Brazil",    -3.1190, -60.0217),
 ]
 
 # --- BME688 optional columns (zero-padded if absent) ---
