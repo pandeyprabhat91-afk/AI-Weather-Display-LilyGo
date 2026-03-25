@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+data/cache/
+data/processed/
+deployment/*.pkl
+deployment/*.tflite
+reports/
+*.egg-info/
+.pytest_cache/
+evaluation/outputs/
