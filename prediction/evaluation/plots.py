@@ -24,6 +24,10 @@ def roc_fig(y_true: np.ndarray, models_proba: dict) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(7, 6))
     colors = ["steelblue", "darkorange", "green"]
     for (name, proba), color in zip(models_proba.items(), colors):
+        # Pad proba to N_CLASSES columns if model was trained on fewer classes
+        if proba.shape[1] < N_CLASSES:
+            pad = np.zeros((proba.shape[0], N_CLASSES - proba.shape[1]))
+            proba = np.hstack([proba, pad])
         fpr, tpr, _ = roc_curve(y_bin.ravel(), proba.ravel())
         roc_auc = auc(fpr, tpr)
         ax.plot(fpr, tpr, color=color, label=f"{name} (AUC = {roc_auc:.3f})")
